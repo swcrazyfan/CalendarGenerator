@@ -254,7 +254,7 @@ def main():
     st.write("---")
     
     st.write("Set Update Interval:")
-    new_interval = st.number_input("Enter update interval in minutes:", min_value=1, value=60)
+    new_interval = st.number_input("Enter update interval in minutes:", min_value=1, value=10080)
     if st.button("Set Interval"):
         app.update_interval = new_interval * 60
         logger.info(f"Update interval set to {new_interval} minutes")
