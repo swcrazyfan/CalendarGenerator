@@ -1,1 +1,5 @@
 streamlit
+requests
+icalendar
+boto3
+pytz
