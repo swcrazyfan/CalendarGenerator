@@ -30,6 +30,8 @@ class CalendarGeneratorApp:
         self.s3_secret_key = st.secrets["s3_secret_key"]
         self.update_interval = 3600  # Default to 1 hour
         self.webcal_url = f"webcal://s3.amazonaws.com/{self.s3_bucket_name}/generated_calendar.ics"
+        self.current_year = datetime.now().year
+        self.next_year = self.current_year + 1
 
     def get_schedule(self, day, date):
         logger.info(f"Getting schedule for {day} on {date}")
@@ -59,7 +61,8 @@ class CalendarGeneratorApp:
                 ("11:30", "12:10", "Period 3B"),
                 ("12:15", "12:55", "Lunch"),
                 ("13:00", "13:40", "Period 4A"),
-                ("13:00", "13:40", "Period 4B")
+                ("13:00", "13:40", "Period 4B"),
+                ("13:40", "17:00", "Professional Development")
             ]
         }
 
@@ -187,7 +190,7 @@ class CalendarGeneratorApp:
                     if dtstart.tzinfo is None:
                         dtstart = beijing_tz.localize(dtstart)
                     
-                    if dtstart.year == 2024:
+                    if dtstart.year in [self.current_year, self.next_year]:
                         if summary and summary.startswith("Day"):
                             # Remove the original Day event
                             original_cal.subcomponents.remove(component)
@@ -247,6 +250,7 @@ def main():
     app = CalendarGeneratorApp()
     
     st.write("This app generates a detailed school calendar and saves it to an S3 bucket.")
+    st.write(f"Processing events for years: {app.current_year} and {app.next_year}")
     
     if st.button("Generate Now"):
         app.perform_generation()
@@ -272,7 +276,7 @@ def main():
     
     # Display log output
     st.subheader("Log Output")
-    st.text_area("Logs", value=log_output.getvalue(), height=300)
+    st.text_area("Logs", value=log_output.getvalue(), height=350)
 
 if __name__ == "__main__":
     main()
