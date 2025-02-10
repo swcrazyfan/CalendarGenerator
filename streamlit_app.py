@@ -32,6 +32,9 @@ class CalendarGeneratorApp:
         self.webcal_url = f"webcal://s3.amazonaws.com/{self.s3_bucket_name}/generated_calendar.ics"
         self.current_year = datetime.now().year
         self.next_year = self.current_year + 1
+        # Set default date range
+        self.start_date = datetime(self.current_year, 8, 1, tzinfo=beijing_tz)  # August 1st current year
+        self.end_date = datetime(self.next_year, 7, 31, tzinfo=beijing_tz)    # July 31st next year
 
     def get_schedule(self, day, date):
         logger.info(f"Getting schedule for {day} on {date}")
@@ -70,9 +73,9 @@ class CalendarGeneratorApp:
             "Day 1": {
                 "Period 1A": "Period 1A - Free",
                 "Period 1B": "Period 1B - Free",
-                "Period 2": "Improv Theatre (ART229.101)", 
-                "Period 3A": "Theatre 8 (ART083.101)",
-                "Period 3B": "Theatre 8 (ART083.101) continued",
+                "Period 2": "Period 2 - Free",
+                "Period 3A": "Period 3A - Free",
+                "Period 3B": "Period 3B - Free",
                 "Period 4A": "Theatre 6 (ART063.103)",
                 "Period 4B": "Theatre 6 (ART063.104)"
             },
@@ -91,15 +94,15 @@ class CalendarGeneratorApp:
                 "Period 2": "Period 2 - Free",
                 "Period 3A": "Period 3A - Free",
                 "Period 3B": "Period 3B- Free",
-                "Period 4A": "Period 4A - Free",
-                "Period 4B": "Period 4B- Free"
+                "Period 4A": "Set Design",
+                "Period 4B": "Set Design - Continued"
             },
             "Day 4": {
                 "Period 1A": "Period 1A - Free",
                 "Period 1B": "Period 1B - Free",
-                "Period 2": "Improv Theatre (ART229.101)", 
-                "Period 3A": "Theatre 8 (ART083.101)",
-                "Period 3B": "Theatre 8 (ART083.101) continued",
+                "Period 2": "Period 2 - Free",
+                "Period 3A": "Period 3A - Free",
+                "Period 3B": "Period 3B - Free",
                 "Period 4A": "Theatre 6 (ART063.103)",
                 "Period 4B": "Theatre 6 (ART063.104)"
             },
@@ -109,8 +112,8 @@ class CalendarGeneratorApp:
                 "Period 2": "Period 2 - Free",
                 "Period 3A": "Period 3A - Free",
                 "Period 3B": "Period 3B- Free",
-                "Period 4A": "Period 4A - Free",
-                "Period 4B": "Period 4B- Free"
+                "Period 4A": "Set Design",
+                "Period 4B": "Set Design - Continued"
             },
             "Day 6": {
                 "Period 1A": "Theatre 7 (ART073.103)",
@@ -122,14 +125,14 @@ class CalendarGeneratorApp:
                 "Period 4B": "Period 4B- Free"
             },
         }
-        
+
         if day not in class_schedules:
             logger.info(f"Day type '{day}' not found in class_schedules")
             return []
 
         base_schedule = time_schedules["wednesday" if is_wednesday else "regular"]
         day_schedule = class_schedules[day]
-        
+
         events = []
 
         # Add the day event starting at 7:59 AM
@@ -141,7 +144,7 @@ class CalendarGeneratorApp:
         day_event.add('uid', str(uuid.uuid4()) + "@yourdomain.com")
         day_event.add('dtstamp', datetime.now(beijing_tz))
         events.append(day_event)
-        
+
         for start_time, end_time, activity in base_schedule:
             start_dt = beijing_tz.localize(datetime.combine(date, datetime.strptime(start_time, "%H:%M").time()))
             end_dt = beijing_tz.localize(datetime.combine(date, datetime.strptime(end_time, "%H:%M").time()))
@@ -167,7 +170,7 @@ class CalendarGeneratorApp:
                 event.add('uid', str(uuid.uuid4()) + "@yourdomain.com")
                 event.add('dtstamp', datetime.now(beijing_tz))
                 events.append(event)
-                
+
         return events
 
     def generate_calendar(self):
@@ -175,40 +178,47 @@ class CalendarGeneratorApp:
         st.text("Fetching original calendar...")
         ical_string = requests.get(self.url).text
         original_cal = Calendar.from_ical(ical_string)
-        
+
         events_added = 0
         events_replaced = 0
 
         st.text("Generating detailed calendar...")
+        filtered_cal = Calendar()
+        # Copy over any non-event properties
+        for key, value in original_cal.items():
+            if key.lower() != 'vevent':
+                filtered_cal.add(key, value)
+
         for component in original_cal.walk():
             if component.name == "VEVENT":
                 summary = component.get('summary')
                 dtstart = component.get('dtstart').dt
-                
+
                 if isinstance(dtstart, datetime):
                     # Preserve the original timezone
                     if dtstart.tzinfo is None:
                         dtstart = beijing_tz.localize(dtstart)
-                    
-                    if dtstart.year in [self.current_year, self.next_year]:
+
+                    # Check if event is within the selected date range
+                    if self.start_date <= dtstart <= self.end_date:
                         if summary and summary.startswith("Day"):
-                            # Remove the original Day event
-                            original_cal.subcomponents.remove(component)
                             events_replaced += 1
-                            
                             # Generate detailed schedule for this day
                             detailed_events = self.get_schedule(summary, dtstart.date())
                             for event in detailed_events:
-                                original_cal.add_component(event)
+                                filtered_cal.add_component(event)
                                 events_added += 1
+                        else:
+                            # Keep non-Day events within date range
+                            filtered_cal.add_component(component)
 
         logger.info(f"Updated calendar: replaced {events_replaced} events, added {events_added} detailed events")
         st.success(f"Updated calendar: replaced {events_replaced} events, added {events_added} detailed events")
-        return original_cal
+        return filtered_cal
 
     def save_calendar(self, cal):
         file_content = cal.to_ical()
-        s3_client = boto3.client('s3', 
+        s3_client = boto3.client('s3',
                                  aws_access_key_id=self.s3_access_key,
                                  aws_secret_access_key=self.s3_secret_key)
 
@@ -246,34 +256,58 @@ class CalendarGeneratorApp:
 
 def main():
     st.title("Calendar Generator App")
-    
+
     app = CalendarGeneratorApp()
-    
+
     st.write("This app generates a detailed school calendar and saves it to an S3 bucket.")
-    st.write(f"Processing events for years: {app.current_year} and {app.next_year}")
     
+    # Date range selection
+    col1, col2 = st.columns(2)
+    with col1:
+        start_date = st.date_input(
+            "Start Date",
+            value=app.start_date.date(),
+            min_value=datetime(app.current_year-1, 1, 1).date(),
+            max_value=datetime(app.next_year+1, 12, 31).date()
+        )
+    with col2:
+        end_date = st.date_input(
+            "End Date",
+            value=app.end_date.date(),
+            min_value=start_date,
+            max_value=datetime(app.next_year+1, 12, 31).date()
+        )
+    
+    # Update app's date range with user selection
+    app.start_date = beijing_tz.localize(datetime.combine(start_date, datetime.min.time()))
+    app.end_date = beijing_tz.localize(datetime.combine(end_date, datetime.max.time()))
+    
+    st.write(f"Calendar will include events from {start_date} to {end_date}")
+
+    st.write(f"Processing events for years: {app.current_year} and {app.next_year}")
+
     if st.button("Generate Now"):
         app.perform_generation()
-    
+
     st.write("---")
-    
+
     st.write("Set Update Interval:")
     new_interval = st.number_input("Enter update interval in minutes:", min_value=1, value=10080)
     if st.button("Set Interval"):
         app.update_interval = new_interval * 60
         logger.info(f"Update interval set to {new_interval} minutes")
         st.success(f"Update interval set to {new_interval} minutes")
-    
+
     st.write("---")
-    
+
     st.write("Webcal URL:")
     st.text(app.webcal_url)
     if st.button("Copy Webcal URL"):
         st.write("Webcal URL copied to clipboard!")
         st.code(app.webcal_url)
-    
+
     st.write("---")
-    
+
     # Display log output
     st.subheader("Log Output")
     st.text_area("Logs", value=log_output.getvalue(), height=350)
